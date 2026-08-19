@@ -219,6 +219,20 @@ If you don't specifically need CapCut, DaVinci Resolve and Kdenlive both run nat
 
 ---
 
+## Credits
+
+**This project exists because of [u/LinsaFTW](https://www.reddit.com/user/LinsaFTW) and their post [Running CapCut on Linux (Now Working) \[UPDATE\]](https://www.reddit.com/r/linux/comments/1mt3em7/running_capcut_on_linux_now_working_update/).**
+
+After a long day of dead ends we had concluded CapCut simply could not run under Wine and had moved on to a different editor entirely. That post was the thing that turned it around — specifically the finding that **3.9.0.1459 works where current versions don't**, which is the single fact this whole guide rests on. It also contributed:
+
+- the pre-create-the-directories workaround that stops the installer hanging
+- the black-overlay transparency workarounds (drag it aside, or set opacity in KWin)
+- the report that 10.13-staging is a known-good Wine version
+
+Everything in the "why 9.x fails" section came from our own debugging, but we would never have thought to try an older build without that post. Credit where it's due.
+
+**WineHQ AppDB** — the entry for CapCut 3.9.0.1459 (rated Silver, tested on 10.13-staging) confirmed the version difference was real and not a fluke. Maintained by Juan Cruz Linsalata.
+
 ## Licence / redistribution
 
 CapCut is proprietary software by ByteDance, and CapNoeh is not affiliated with or endorsed by ByteDance. Nothing here redistributes CapCut — these are configuration notes only. Get the installer from a source you trust and verify the signature as shown above.
