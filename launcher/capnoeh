@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# CapNoeh - launch CapCut 3.9.0.1459 in its own Wine prefix
+# https://github.com/<your-user>/CapNoeh
+
+set -euo pipefail
+
+WINEPREFIX="${CAPNOEH_PREFIX:-$HOME/.local/share/wineprefixes/capcut39}"
+export WINEPREFIX
+export WINEDEBUG="${WINEDEBUG:--all}"
+
+CAPCUT="C:\\users\\$USER\\AppData\\Local\\CapCut\\Apps\\CapCut.exe"
+
+if [ ! -d "$WINEPREFIX" ]; then
+    echo "CapNoeh: prefix not found at $WINEPREFIX" >&2
+    echo "Run the install steps in the README first." >&2
+    exit 1
+fi
+
+# Guard against the auto-update that would replace 3.9 with the broken 9.x.
+CFG="$WINEPREFIX/drive_c/users/$USER/AppData/Local/CapCut/User Data/Config/globalSetting"
+if [ -f "$CFG" ] && ! grep -q '^enableAutoUpdate=false' "$CFG"; then
+    echo "CapNoeh: WARNING - auto-update is not disabled in globalSetting." >&2
+    echo "  CapCut may update itself into 9.x, which does not work under Wine." >&2
+    echo "  See the 'Block auto-update' section of the README." >&2
+fi
+
+exec wine "$CAPCUT" "$@"

@@ -170,6 +170,10 @@ Confirm it's actually alive — `CrBrowserMain` should show `S` or `R`, never `Z
 ps -e -o pid,stat,etime,comm | grep CrBrowserMain
 ```
 
+### 6. Launcher (optional)
+
+[`launcher/`](launcher/) has a `capnoeh` wrapper script and a desktop entry, so CapCut shows up in your application menu like a normal app. The wrapper also warns you if auto-update ever gets re-enabled, since that would quietly replace your working install with the broken 9.x build.
+
 ---
 
 ## Making the file dialog usable
@@ -223,4 +227,18 @@ The notes themselves are free to use, adapt, and share.
 
 ## Contributing
 
-If you get this working on another distro, desktop, or GPU — or find a Wine version where 9.x behaves differently — open an issue with your `ps -e -o pid,stat,comm | grep CrBrowserMain` output and Wine version. The zombie-vs-live distinction is the fastest way to tell whether a given build has any chance.
+If you get this working on another distro, desktop, or GPU — or find a Wine version where 9.x behaves differently — please share it.
+
+**Bug reports and technical findings:** open an issue. Include your Wine version and the output of:
+
+```bash
+ps -e -o pid,stat,comm | grep CrBrowserMain
+```
+
+The zombie-vs-live distinction (`Z` vs `S`/`R`) is the fastest way to tell whether a given build has any chance at all.
+
+**Or just email me: noehnoeis5@gmail.com**
+
+Whether it's a fix, something that didn't work for you, a question, or you just want to say it helped — I read them, I'll take a careful look, and I'll reply. If your findings improve things, I'll update the launcher and these notes so everyone gets the benefit.
+
+Issues are better for anything with logs attached, since other people hitting the same problem can find them. But email is genuinely welcome.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CapCut
+GenericName=Video Editor
+Comment=CapCut 3.9.0.1459 via Wine (CapNoeh)
+Exec=capnoeh
+Icon=capcut
+Categories=AudioVideo;Video;AudioVideoEditing;
+Terminal=false
+StartupWMClass=capcut.exe
