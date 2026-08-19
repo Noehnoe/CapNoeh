@@ -1,6 +1,10 @@
-# CapCut on Linux under Wine — what works, what doesn't, and why
+# CapNoeh — CapCut on Linux under Wine
 
-Notes from getting CapCut running on Linux with Wine. The short version: **the current CapCut (9.x) cannot work under Wine, and no amount of configuration fixes it. CapCut 3.9.0.1459 works fine.** The deciding factor is the app version, not your Wine settings.
+**A complete, working setup for running CapCut on Linux — plus the analysis of why the current version can't work.**
+
+The short version: **the current CapCut (9.x) cannot work under Wine, and no amount of configuration fixes it. CapCut 3.9.0.1459 works fine.** The deciding factor is the app version, not your Wine settings.
+
+CapNoeh is a set of configuration notes and fixes, not a fork or a repackage of CapCut — you install ByteDance's own signed installer and apply what's below.
 
 Written up because the failure mode of 9.x is misleading — it looks like a broken-input problem, and you can burn a lot of time chasing that.
 
@@ -213,4 +217,10 @@ If you don't specifically need CapCut, DaVinci Resolve and Kdenlive both run nat
 
 ## Licence / redistribution
 
-CapCut is proprietary software by ByteDance. Nothing here redistributes it — these are configuration notes only. Get the installer from a source you trust and verify the signature as shown above.
+CapCut is proprietary software by ByteDance, and CapNoeh is not affiliated with or endorsed by ByteDance. Nothing here redistributes CapCut — these are configuration notes only. Get the installer from a source you trust and verify the signature as shown above.
+
+The notes themselves are free to use, adapt, and share.
+
+## Contributing
+
+If you get this working on another distro, desktop, or GPU — or find a Wine version where 9.x behaves differently — open an issue with your `ps -e -o pid,stat,comm | grep CrBrowserMain` output and Wine version. The zombie-vs-live distinction is the fastest way to tell whether a given build has any chance.
