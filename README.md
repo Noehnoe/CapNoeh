@@ -208,6 +208,16 @@ Drive letters are only enumerated when the wineserver starts, so fully quit the 
 
 ---
 
+## Why there is no Flatpak / AppImage
+
+Short answer: Flathub's rules forbid it, and there's no legal way around them.
+
+- Flathub only accepts submissions that use "emulation or translation layers" (which includes Wine) **when they come from the upstream developers**. A Wine wrapper for CapCut published by anyone other than ByteDance gets rejected.
+- CapCut is not redistributable, so a Flatpak would have to fetch it via `extra-data` from an *official* vendor URL with a fixed checksum. ByteDance only distributes the current release, and the current release is the broken one — there is no official URL for 3.9.0.1459.
+- Bundling the installer here instead would mean redistributing proprietary software without permission.
+
+So CapNoeh is configuration, not a package. The install steps above are the supported path.
+
 ## Known issues with 3.9
 
 - The video-preview overlay and some child windows can render **black instead of transparent**. Workarounds: drag the overlay aside, or set its opacity to ~50% in KWin.
