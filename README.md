@@ -6,7 +6,12 @@ The short version: **the current CapCut (9.x) cannot work under Wine, and no amo
 
 CapNoeh is a launcher plus a set of configuration notes — not a fork or a repackage of CapCut. You supply ByteDance's own signed installer; CapNoeh verifies it and sets everything up around it.
 
-**Want the short path?** Use the [CapNoeh Launcher](app/) — hand it the installer and it does the whole setup, verification included. The rest of this document explains what it's doing and why.
+**Want the short path?** [**Download the AppImage**](https://github.com/Noehnoe/CapNoeh/releases/latest) — one file, no install. Hand it the CapCut installer and it does the whole setup, verification included. The rest of this document explains what it's doing and why.
+
+```bash
+chmod +x CapNoeh-x86_64.AppImage
+./CapNoeh-x86_64.AppImage
+```
 
 <p align="center">
   <img src="docs/launcher.png" alt="CapNoeh Launcher" width="620">
