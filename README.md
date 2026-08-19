@@ -1,4 +1,4 @@
-# CapNoeh — CapCut on Linux under Wine
+# CapNoeh (CapCut for Linux!)
 
 **A complete, working setup for running CapCut on Linux — plus the analysis of why the current version can't work.**
 
@@ -7,6 +7,10 @@ The short version: **the current CapCut (9.x) cannot work under Wine, and no amo
 CapNoeh is a launcher plus a set of configuration notes — not a fork or a repackage of CapCut. You supply ByteDance's own signed installer; CapNoeh verifies it and sets everything up around it.
 
 **Want the short path?** Use the [CapNoeh Launcher](app/) — hand it the installer and it does the whole setup, verification included. The rest of this document explains what it's doing and why.
+
+<p align="center">
+  <img src="docs/launcher.png" alt="CapNoeh Launcher" width="620">
+</p>
 
 Written up because the failure mode of 9.x is misleading — it looks like a broken-input problem, and you can burn a lot of time chasing that.
 

@@ -2,7 +2,7 @@
 
 A GTK app that installs CapCut for you and then acts as its launcher.
 
-![what it does](#)
+![CapNoeh Launcher](../docs/launcher.png)
 
 You hand it the CapCut installer; it does the rest:
 
