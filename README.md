@@ -4,7 +4,9 @@
 
 The short version: **the current CapCut (9.x) cannot work under Wine, and no amount of configuration fixes it. CapCut 3.9.0.1459 works fine.** The deciding factor is the app version, not your Wine settings.
 
-CapNoeh is a set of configuration notes and fixes, not a fork or a repackage of CapCut — you install ByteDance's own signed installer and apply what's below.
+CapNoeh is a launcher plus a set of configuration notes — not a fork or a repackage of CapCut. You supply ByteDance's own signed installer; CapNoeh verifies it and sets everything up around it.
+
+**Want the short path?** Use the [CapNoeh Launcher](app/) — hand it the installer and it does the whole setup, verification included. The rest of this document explains what it's doing and why.
 
 Written up because the failure mode of 9.x is misleading — it looks like a broken-input problem, and you can burn a lot of time chasing that.
 
@@ -170,9 +172,12 @@ Confirm it's actually alive — `CrBrowserMain` should show `S` or `R`, never `Z
 ps -e -o pid,stat,etime,comm | grep CrBrowserMain
 ```
 
-### 6. Launcher (optional)
+### 6. Launcher
 
-[`launcher/`](launcher/) has a `capnoeh` wrapper script and a desktop entry, so CapCut shows up in your application menu like a normal app. The wrapper also warns you if auto-update ever gets re-enabled, since that would quietly replace your working install with the broken 9.x build.
+Two options:
+
+- **[`app/`](app/) — the CapNoeh Launcher (recommended).** A GTK app that does all of the above *for you*: you point it at the installer, it verifies the checksum and ByteDance signature, builds the prefix, blocks auto-update before first launch, fixes the file dialog, and then becomes your launcher. It also warns you if the auto-update guard ever disappears.
+- **[`launcher/`](launcher/)** — a minimal shell wrapper plus desktop entry, if you'd rather not run a GUI.
 
 ---
 

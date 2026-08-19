@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CapNoeh
+GenericName=CapCut Installer & Launcher
+Comment=Install and launch CapCut on Linux under Wine
+Exec=capnoeh-launcher
+Icon=capnoeh
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=capcut;video;editor;wine;
+Terminal=false
+StartupNotify=true

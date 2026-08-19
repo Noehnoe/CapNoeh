@@ -1,0 +1,795 @@
+#!/usr/bin/env python3
+"""
+CapNoeh Launcher — install and run CapCut on Linux under Wine.
+
+Hand it the CapCut installer; it verifies the file, sets everything up,
+and then becomes your launcher. Nothing proprietary ships with this
+program — you supply the installer yourself.
+
+https://github.com/Noehnoe/CapNoeh
+"""
+
+import hashlib
+import os
+import shutil
+import subprocess
+import threading
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango  # noqa: E402
+
+APP_NAME = "CapNoeh"
+CAPCUT_VERSION = "3.9.0.1459"
+PROJECT_URL = "https://github.com/Noehnoe/CapNoeh"
+
+# The build known to work. See the README for why newer versions cannot.
+KNOWN_SHA256 = "7f8c29b84334b76d4a0af8674b63c7a3c64cc3a03519ae0e552d5baaa115755d"
+KNOWN_SIZE = 550534120
+
+HOME = os.path.expanduser("~")
+USER = os.environ.get("USER") or os.path.basename(HOME)
+PREFIX = os.environ.get("CAPNOEH_PREFIX", f"{HOME}/.local/share/wineprefixes/capcut39")
+
+APPDATA = f"{PREFIX}/drive_c/users/{USER}/AppData/Local/CapCut"
+CONFIG_DIR = f"{APPDATA}/User Data/Config"
+GLOBAL_SETTING = f"{CONFIG_DIR}/globalSetting"
+CAPCUT_WIN = rf"C:\users\{USER}\AppData\Local\CapCut\Apps\CapCut.exe"
+CAPCUT_HOST = f"{APPDATA}/Apps/CapCut.exe"
+ICON_GLOB = f"{APPDATA}/Apps/{CAPCUT_VERSION}/Resources/logo_cc.png"
+
+# Written before first launch. Without this, CapCut updates itself into the
+# 9.x build, which cannot run under Wine at all.
+UPDATE_BLOCK = (
+    "[General]\r\n"
+    "enableAutoUpdate=false\r\n"
+    "totalSilentUpgradeSwitch=false\r\n"
+    "localTestSilentUpdateSwtich=false\r\n"
+    "debugSilentUpgradeSwitch=false\r\n"
+    "user_license_agreed=true\r\n"
+    "privacy_policy_update_time=9999999999\r\n"
+)
+
+CSS = b"""
+@define-color bg      #101216;
+@define-color panel   #191d24;
+@define-color panel2  #212734;
+@define-color line    #2c333f;
+@define-color accent  #00d0dd;
+@define-color accent2 #12e6a4;
+@define-color text    #e8edf4;
+@define-color dim     #8794a8;
+@define-color danger  #ff5f6d;
+@define-color warn    #ffb23f;
+
+window.capnoeh { background: @bg; }
+
+.hero {
+    background: linear-gradient(135deg, #171c26 0%, #101216 60%);
+    border-bottom: 1px solid @line;
+}
+.wordmark {
+    font-family: "Inter", "Cantarell", sans-serif;
+    font-size: 30px;
+    font-weight: 800;
+    color: @text;
+}
+.wordmark-accent { color: @accent; }
+.tagline { color: @dim; font-size: 12px; }
+
+.chip {
+    background: @panel2;
+    color: @dim;
+    border: 1px solid @line;
+    border-radius: 999px;
+    padding: 3px 12px;
+    font-size: 11px;
+}
+.chip-ok     { color: #0b1512; background: @accent2; border-color: @accent2; font-weight: 700; }
+.chip-warn   { color: #241800; background: @warn;    border-color: @warn;    font-weight: 700; }
+.chip-bad    { color: #2a0d10; background: @danger;  border-color: @danger;  font-weight: 700; }
+
+.card {
+    background: @panel;
+    border: 1px solid @line;
+    border-radius: 14px;
+    padding: 14px;
+}
+.card-title { color: @text; font-weight: 700; font-size: 13px; }
+.meta { color: @dim; font-size: 11px; }
+.meta-key { color: @dim; font-size: 11px; }
+.meta-val { color: @text; font-size: 11px; }
+
+button.cta {
+    background: linear-gradient(135deg, @accent 0%, @accent2 100%);
+    color: #06131a;
+    font-weight: 800;
+    font-size: 15px;
+    border: none;
+    border-radius: 12px;
+    padding: 13px 30px;
+}
+button.cta:hover  { background: linear-gradient(135deg, #2ce0ec 0%, #3bf0b8 100%); }
+button.cta:active { background: linear-gradient(135deg, #00b2bd 0%, #0fc98d 100%); }
+button.cta:disabled {
+    background: @panel2; color: @dim;
+}
+
+button.ghost {
+    background: transparent;
+    color: @dim;
+    border: 1px solid @line;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 13px;
+}
+button.ghost:hover { color: @text; border-color: @accent; }
+button.ghost:disabled { color: #4a5364; border-color: @line; }
+
+.console {
+    background: #0a0c10;
+    border: 1px solid @line;
+    border-radius: 12px;
+}
+.console text {
+    background: #0a0c10;
+    color: #b9c6d8;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 11px;
+}
+
+progressbar trough {
+    background: @panel2; border: none; border-radius: 999px; min-height: 6px;
+}
+progressbar progress {
+    background: linear-gradient(90deg, @accent, @accent2);
+    border-radius: 999px; min-height: 6px;
+}
+.statusline { color: @dim; font-size: 12px; }
+.footer { color: #566173; font-size: 10px; }
+"""
+
+
+def wine_env():
+    env = os.environ.copy()
+    env["WINEPREFIX"] = PREFIX
+    env.setdefault("WINEDEBUG", "-all")
+    return env
+
+
+def is_installed():
+    return os.path.exists(CAPCUT_HOST)
+
+
+def find_wine():
+    return shutil.which("wine") or (
+        "/opt/wine-staging/bin/wine"
+        if os.path.exists("/opt/wine-staging/bin/wine")
+        else None
+    )
+
+
+def wine_version():
+    w = find_wine()
+    if not w:
+        return None
+    try:
+        out = subprocess.run(
+            [w, "--version"], capture_output=True, text=True, timeout=15
+        )
+        return out.stdout.strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def update_blocked():
+    if not os.path.exists(GLOBAL_SETTING):
+        return None
+    try:
+        with open(GLOBAL_SETTING, encoding="utf-8", errors="replace") as f:
+            return "enableAutoUpdate=false" in f.read()
+    except OSError:
+        return None
+
+
+def sha256_of(path, progress=None):
+    h = hashlib.sha256()
+    total = os.path.getsize(path) or 1
+    read = 0
+    with open(path, "rb") as f:
+        while chunk := f.read(1024 * 1024):
+            h.update(chunk)
+            read += len(chunk)
+            if progress:
+                progress(read / total)
+    return h.hexdigest()
+
+
+def verify_signature(path):
+    """Check the ByteDance Authenticode signature. Returns (ok, message)."""
+    try:
+        from signify.authenticode.signed_file import SignedPEFile
+    except ImportError:
+        return None, "signify not installed — skipped (pip install --user signify)"
+    try:
+        with open(path, "rb") as f:
+            pe = SignedPEFile(f)
+            status, err = pe.explain_verify()
+            if str(status) != "AuthenticodeVerificationResult.OK":
+                return False, f"signature INVALID — {err}"
+            for sig in pe.signatures:
+                for cert in sig.certificates:
+                    if "ytedance" in cert.subject.dn:
+                        return True, "valid — signed by Bytedance Pte. Ltd."
+            return True, "valid signature (signer name not matched)"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"could not verify — {exc}"
+
+
+class Launcher(Gtk.Window):
+    def __init__(self):
+        super().__init__(title=APP_NAME)
+        self.get_style_context().add_class("capnoeh")
+        self.set_default_size(720, 640)
+        self.busy = False
+        self._build_ui()
+        self.refresh()
+
+    # ---------- ui ----------
+
+    def _build_ui(self):
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.set_title(APP_NAME)
+        hb.set_subtitle("CapCut for Linux")
+        self.set_titlebar(hb)
+
+        self.log_toggle = Gtk.ToggleButton(label="Details")
+        self.log_toggle.get_style_context().add_class("ghost")
+        self.log_toggle.connect("toggled", self._on_toggle_log)
+        hb.pack_end(self.log_toggle)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+
+        # hero
+        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        hero.get_style_context().add_class("hero")
+        hero.set_border_width(22)
+        root.pack_start(hero, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row.set_halign(Gtk.Align.CENTER)
+        hero.pack_start(row, False, False, 0)
+
+        self.logo = Gtk.Image()
+        self._load_logo()
+        row.pack_start(self.logo, False, False, 0)
+
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        titles.set_valign(Gtk.Align.CENTER)
+        row.pack_start(titles, False, False, 0)
+
+        mark = Gtk.Label()
+        mark.set_markup(
+            "<span foreground='#e8edf4'>Cap</span>"
+            "<span foreground='#00d0dd'>Noeh</span>"
+        )
+        mark.get_style_context().add_class("wordmark")
+        mark.set_xalign(0)
+        titles.pack_start(mark, False, False, 0)
+
+        tag = Gtk.Label(label="CapCut on Linux, without the guesswork")
+        tag.get_style_context().add_class("tagline")
+        tag.set_xalign(0)
+        titles.pack_start(tag, False, False, 0)
+
+        self.chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.chips.set_halign(Gtk.Align.CENTER)
+        hero.pack_start(self.chips, False, False, 4)
+
+        # body
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        body.set_border_width(20)
+        root.pack_start(body, True, True, 0)
+
+        self.status = Gtk.Label()
+        self.status.get_style_context().add_class("statusline")
+        self.status.set_line_wrap(True)
+        self.status.set_justify(Gtk.Justification.CENTER)
+        body.pack_start(self.status, False, False, 0)
+
+        self.progress = Gtk.ProgressBar()
+        self.progress.set_no_show_all(True)
+        body.pack_start(self.progress, False, False, 0)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        actions.set_halign(Gtk.Align.CENTER)
+        body.pack_start(actions, False, False, 4)
+
+        self.primary = Gtk.Button(label="Launch CapCut")
+        self.primary.get_style_context().add_class("cta")
+        self.primary.connect("clicked", self.on_primary)
+        actions.pack_start(self.primary, False, False, 0)
+
+        self.secondary = Gtk.Button(label="Reinstall…")
+        self.secondary.get_style_context().add_class("ghost")
+        self.secondary.connect("clicked", self.on_install_clicked)
+        actions.pack_start(self.secondary, False, False, 0)
+
+        # info card
+        self.card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.card.get_style_context().add_class("card")
+        body.pack_start(self.card, False, False, 0)
+
+        ct = Gtk.Label(label="Installation")
+        ct.get_style_context().add_class("card-title")
+        ct.set_xalign(0)
+        self.card.pack_start(ct, False, False, 0)
+
+        self.grid = Gtk.Grid(column_spacing=16, row_spacing=5)
+        self.card.pack_start(self.grid, False, False, 0)
+
+        # console
+        self.revealer = Gtk.Revealer()
+        self.revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN
+        )
+        self.revealer.set_transition_duration(180)
+        body.pack_start(self.revealer, True, True, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.get_style_context().add_class("console")
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_size_request(-1, 220)
+        self.revealer.add(scroll)
+
+        self.logview = Gtk.TextView()
+        self.logview.get_style_context().add_class("console")
+        self.logview.set_editable(False)
+        self.logview.set_cursor_visible(False)
+        self.logview.set_left_margin(12)
+        self.logview.set_right_margin(12)
+        self.logview.set_top_margin(10)
+        self.logview.set_bottom_margin(10)
+        self.logview.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        scroll.add(self.logview)
+
+        buf = self.logview.get_buffer()
+        buf.create_tag("ok", foreground="#12e6a4")
+        buf.create_tag("bad", foreground="#ff5f6d")
+        buf.create_tag("warn", foreground="#ffb23f")
+        buf.create_tag("dim", foreground="#6b7789")
+
+        foot = Gtk.Label(label=PROJECT_URL)
+        foot.get_style_context().add_class("footer")
+        body.pack_end(foot, False, False, 0)
+
+    def _load_logo(self):
+        size = 56
+        if os.path.exists(ICON_GLOB):
+            try:
+                pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    ICON_GLOB, size, size, True
+                )
+                self.logo.set_from_pixbuf(pb)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        self.logo.set_from_icon_name("video-x-generic", Gtk.IconSize.DIALOG)
+        self.logo.set_pixel_size(size)
+
+    def _on_toggle_log(self, btn):
+        self.revealer.set_reveal_child(btn.get_active())
+
+    def _chip(self, text, kind=None):
+        lbl = Gtk.Label(label=text)
+        ctx = lbl.get_style_context()
+        ctx.add_class("chip")
+        if kind:
+            ctx.add_class(f"chip-{kind}")
+        return lbl
+
+    def _set_chips(self, items):
+        for child in self.chips.get_children():
+            self.chips.remove(child)
+        for text, kind in items:
+            self.chips.pack_start(self._chip(text, kind), False, False, 0)
+        self.chips.show_all()
+
+    def _set_meta(self, rows):
+        for child in self.grid.get_children():
+            self.grid.remove(child)
+        for i, (k, v) in enumerate(rows):
+            kl = Gtk.Label(label=k)
+            kl.get_style_context().add_class("meta-key")
+            kl.set_xalign(0)
+            vl = Gtk.Label(label=v)
+            vl.get_style_context().add_class("meta-val")
+            vl.set_xalign(0)
+            vl.set_selectable(True)
+            vl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            self.grid.attach(kl, 0, i, 1, 1)
+            self.grid.attach(vl, 1, i, 1, 1)
+        self.grid.show_all()
+
+    # ---------- helpers ----------
+
+    def log(self, text, tag=None):
+        def append():
+            buf = self.logview.get_buffer()
+            end = buf.get_end_iter()
+            if tag:
+                buf.insert_with_tags_by_name(end, text + "\n", tag)
+            else:
+                buf.insert(end, text + "\n")
+            self.logview.scroll_to_mark(buf.get_insert(), 0.0, False, 0, 0)
+            return False
+
+        GLib.idle_add(append)
+
+    def set_status(self, markup):
+        GLib.idle_add(lambda: self.status.set_markup(markup) or False)
+
+    def set_busy(self, busy):
+        self.busy = busy
+
+        def apply():
+            self.primary.set_sensitive(not busy)
+            self.secondary.set_sensitive(not busy)
+            self.progress.set_visible(busy)
+            if busy and not self.log_toggle.get_active():
+                self.log_toggle.set_active(True)
+            if not busy:
+                self.progress.set_fraction(0.0)
+            return False
+
+        GLib.idle_add(apply)
+
+    def refresh(self):
+        wv = wine_version()
+        if not wv:
+            self._set_chips([("Wine not found", "bad")])
+            self.set_status(
+                "<b>Wine is not installed.</b>  Install wine-staging, then reopen "
+                f"{APP_NAME}."
+            )
+            self.primary.set_label("Wine missing")
+            self.primary.set_sensitive(False)
+            self.secondary.set_visible(False)
+            self._set_meta([("Expected", "wine-staging (not Proton/Bottles)")])
+            return
+
+        if is_installed():
+            blocked = update_blocked()
+            chips = [(f"CapCut {CAPCUT_VERSION}", "ok"), (wv, None)]
+            if blocked is True:
+                chips.append(("Auto-update blocked", "ok"))
+            elif blocked is False:
+                chips.append(("Auto-update NOT blocked", "bad"))
+            self._set_chips(chips)
+
+            if blocked is False:
+                self.set_status(
+                    "<span foreground='#ff5f6d'><b>Auto-update is not blocked.</b></span>  "
+                    "CapCut may replace itself with the 9.x build, which cannot run "
+                    "under Wine. Use Repair to fix this."
+                )
+                self.secondary.set_label("Repair")
+            else:
+                self.set_status("Ready.")
+                self.secondary.set_label("Reinstall…")
+
+            self.primary.set_label("Launch CapCut")
+            self.primary.set_sensitive(True)
+            self.secondary.set_visible(True)
+            self._set_meta(
+                [
+                    ("Version", CAPCUT_VERSION),
+                    ("Prefix", PREFIX),
+                    ("Wine", wv),
+                    (
+                        "Auto-update",
+                        {True: "blocked", False: "NOT blocked", None: "unknown"}[
+                            blocked
+                        ],
+                    ),
+                ]
+            )
+        else:
+            self._set_chips([("Not installed", "warn"), (wv, None)])
+            self.set_status(
+                f"Select the CapCut {CAPCUT_VERSION} installer and {APP_NAME} will "
+                "verify it, set up an isolated Wine prefix, and block the auto-update "
+                "that would otherwise break it.\n"
+                "<span foreground='#6b7789'>Nothing is downloaded for you — supply "
+                "the installer yourself.</span>"
+            )
+            self.primary.set_label("Select CapCut installer…")
+            self.primary.set_sensitive(True)
+            self.secondary.set_visible(False)
+            self._set_meta(
+                [("Prefix", PREFIX), ("Wine", wv), ("Expected SHA-256", KNOWN_SHA256)]
+            )
+
+    # ---------- actions ----------
+
+    def on_primary(self, _btn):
+        if is_installed():
+            self.launch()
+        else:
+            self.on_install_clicked(None)
+
+    def launch(self):
+        wine = find_wine()
+        self.log(f"Launching {CAPCUT_WIN}")
+        try:
+            subprocess.Popen(
+                [wine, CAPCUT_WIN],
+                env=wine_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.log("CapCut started.", "ok")
+            self.set_status("CapCut is starting…")
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Failed to launch: {exc}", "bad")
+
+    def on_install_clicked(self, _btn):
+        if is_installed() and self.secondary.get_label() == "Repair":
+            threading.Thread(target=self.repair, daemon=True).start()
+            return
+
+        dialog = Gtk.FileChooserDialog(
+            title=f"Select the CapCut {CAPCUT_VERSION} installer",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_buttons(
+            "Cancel", Gtk.ResponseType.CANCEL, "Open", Gtk.ResponseType.OK
+        )
+        flt = Gtk.FileFilter()
+        flt.set_name("CapCut installer (*.exe)")
+        flt.add_pattern("*.exe")
+        dialog.add_filter(flt)
+        downloads = os.path.join(HOME, "Downloads")
+        if os.path.isdir(downloads):
+            dialog.set_current_folder(downloads)
+        if dialog.run() == Gtk.ResponseType.OK:
+            path = dialog.get_filename()
+            dialog.destroy()
+            threading.Thread(target=self.install, args=(path,), daemon=True).start()
+        else:
+            dialog.destroy()
+
+    # ---------- install ----------
+
+    def repair(self):
+        self.set_busy(True)
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            existing = ""
+            if os.path.exists(GLOBAL_SETTING):
+                with open(GLOBAL_SETTING, encoding="utf-8", errors="replace") as f:
+                    existing = f.read()
+            keep = [
+                ln
+                for ln in existing.splitlines(True)
+                if not ln.startswith("[General]")
+                and not ln.split("=")[0]
+                in (
+                    "enableAutoUpdate",
+                    "totalSilentUpgradeSwitch",
+                    "localTestSilentUpdateSwtich",
+                    "debugSilentUpgradeSwitch",
+                    "user_license_agreed",
+                    "privacy_policy_update_time",
+                )
+            ]
+            with open(GLOBAL_SETTING, "w", encoding="utf-8", newline="") as f:
+                f.write(UPDATE_BLOCK)
+                f.writelines(keep)
+            self.log("Re-applied the auto-update block.", "ok")
+            self.configure_file_dialog()
+            self.set_status("Repaired.")
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Repair failed: {exc}", "bad")
+        finally:
+            self.set_busy(False)
+            GLib.idle_add(lambda: self.refresh() or False)
+
+    def install(self, installer):
+        self.set_busy(True)
+        try:
+            self.log(f"Installer: {installer}", "dim")
+
+            size = os.path.getsize(installer)
+            if size == KNOWN_SIZE:
+                self.log(f"Size {size} bytes — matches.", "ok")
+            else:
+                self.log(f"Size {size} bytes — expected {KNOWN_SIZE}.", "warn")
+
+            self.set_status("Verifying checksum…")
+            digest = sha256_of(
+                installer, lambda f: GLib.idle_add(self.progress.set_fraction, f)
+            )
+            self.log(f"SHA-256 {digest}", "dim")
+
+            if digest != KNOWN_SHA256:
+                self.log("Checksum does NOT match the known-good build.", "bad")
+                if not self.confirm_mismatch():
+                    self.log("Install cancelled.", "warn")
+                    return
+            else:
+                self.log("Checksum matches the known-good build.", "ok")
+
+            self.set_status("Verifying signature…")
+            ok, msg = verify_signature(installer)
+            self.log(
+                f"Authenticode: {msg}",
+                "ok" if ok else ("bad" if ok is False else "warn"),
+            )
+            if ok is False and not self.confirm_bad_signature(msg):
+                self.log("Install cancelled.", "warn")
+                return
+
+            wine = find_wine()
+            self.set_status("Preparing the Wine prefix…")
+            subprocess.run(
+                [wine, "wineboot", "-i"],
+                env=wine_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            self.log("Wine prefix ready.", "ok")
+
+            # The installer hangs unless these exist beforehand.
+            for d in (APPDATA, CONFIG_DIR, f"{APPDATA}/User Data/Log"):
+                os.makedirs(d, exist_ok=True)
+            self.log("Created the directories the installer needs.", "ok")
+
+            with open(GLOBAL_SETTING, "w", encoding="utf-8", newline="") as f:
+                f.write(UPDATE_BLOCK)
+            self.log("Blocked auto-update before first launch.", "ok")
+
+            self.set_status("Running the CapCut installer — follow its prompts…")
+            subprocess.run(
+                [wine, installer],
+                env=wine_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+            if is_installed():
+                self.log("CapCut installed.", "ok")
+                self.configure_file_dialog()
+                GLib.idle_add(lambda: self._load_logo() or False)
+                self.set_status("Install complete.")
+            else:
+                self.log("CapCut.exe not found — install may not have finished.", "bad")
+                self.set_status("Install did not complete. Open Details.")
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Error: {exc}", "bad")
+            self.set_status("Something went wrong. Open Details.")
+        finally:
+            self.set_busy(False)
+            GLib.idle_add(lambda: self.refresh() or False)
+
+    def configure_file_dialog(self):
+        """Wine's file picker hides your home folders; surface them."""
+        wine = find_wine()
+        key = (
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion"
+            r"\Policies\Comdlg32\Placesbar"
+        )
+        for name, typ, data in (
+            ("Place0", "REG_SZ", rf"C:\users\{USER}\Downloads"),
+            ("Place1", "REG_SZ", rf"C:\users\{USER}\Videos"),
+            ("Place2", "REG_SZ", rf"C:\users\{USER}\Pictures"),
+            ("Place3", "REG_SZ", rf"C:\users\{USER}"),
+            ("Place4", "REG_DWORD", "17"),  # CSIDL_DRIVES
+        ):
+            subprocess.run(
+                [wine, "reg", "add", key, "/v", name, "/t", typ, "/d", data, "/f"],
+                env=wine_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+        dosdev = f"{PREFIX}/dosdevices"
+        os.makedirs(dosdev, exist_ok=True)
+        for letter, target in (
+            ("d:", f"{HOME}/Downloads"),
+            ("v:", f"{HOME}/Videos"),
+            ("p:", f"{HOME}/Pictures"),
+            ("h:", HOME),
+        ):
+            if not os.path.isdir(target):
+                continue
+            link = os.path.join(dosdev, letter)
+            if os.path.islink(link):
+                os.unlink(link)
+            if not os.path.exists(link):
+                os.symlink(target, link)
+            subprocess.run(
+                [wine, "reg", "add", r"HKLM\Software\Wine\Drives",
+                 "/v", letter, "/d", "hd", "/f"],
+                env=wine_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        self.log("Added Downloads/Videos/Pictures/Home to the file dialog.", "ok")
+
+    # ---------- confirmations ----------
+
+    def _ask(self, primary, secondary):
+        result = {}
+        done = threading.Event()
+
+        def show():
+            dlg = Gtk.MessageDialog(
+                transient_for=self,
+                modal=True,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.NONE,
+                text=primary,
+            )
+            dlg.format_secondary_text(secondary)
+            dlg.add_buttons(
+                "Cancel", Gtk.ResponseType.CANCEL,
+                "Install anyway", Gtk.ResponseType.ACCEPT,
+            )
+            result["ok"] = dlg.run() == Gtk.ResponseType.ACCEPT
+            dlg.destroy()
+            done.set()
+            return False
+
+        GLib.idle_add(show)
+        done.wait()
+        return result.get("ok", False)
+
+    def confirm_mismatch(self):
+        return self._ask(
+            "This is not the build CapNoeh knows about.",
+            "The checksum does not match CapCut 3.9.0.1459. It could be a "
+            "different version, a corrupted download, or something else "
+            "entirely.\n\nOnly continue if you know exactly where this file "
+            "came from.",
+        )
+
+    def confirm_bad_signature(self, msg):
+        return self._ask(
+            "The installer's signature did not verify.",
+            f"{msg}\n\nA genuine CapCut installer is signed by ByteDance. "
+            "A failed check means the file may have been modified.\n\n"
+            "Continuing is not recommended.",
+        )
+
+
+def main():
+    provider = Gtk.CssProvider()
+    provider.load_from_data(CSS)
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(), provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+    Gtk.Settings.get_default().set_property(
+        "gtk-application-prefer-dark-theme", True
+    )
+
+    win = Launcher()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    win.progress.set_visible(False)
+    win.revealer.set_reveal_child(False)
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
